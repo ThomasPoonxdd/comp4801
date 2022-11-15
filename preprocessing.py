@@ -8,9 +8,27 @@ import json
 class dataset(data.Dataset):
     
     # initialise function of class
-    def __init__(self, root, filenames, labels):
+    # images: location of the images dictionary
+    # info: location of the json file with images' info
+    def __init__(self, images, info):
+
+        # list of names of images
+        filenames = []
+
+        # list of category ids
+        labels = []
+
+        # retrieve information from json
+        f = open(info)
+        data = json.load(f)
+        for i in data['annotations']:
+            fname = str(i['id']).zfill(12) + '.jpg'
+            filenames.append(fname)
+            labels.append(i['category_id'])
+        f.close()
+
         # the data directory 
-        self.root = root
+        self.images = images
         # the list of filename
         self.filenames = filenames
         # the list of label
@@ -21,7 +39,7 @@ class dataset(data.Dataset):
         # obtain filenames from list
         image_filename = self.filenames[index]
         # Load data and label
-        image = Image.open(os.path.join(self.root, image_filename))
+        image = Image.open(os.path.join(self.images, image_filename))
         label = self.labels[index]
         
         # output of Dataset must be tensor
@@ -32,23 +50,3 @@ class dataset(data.Dataset):
     # the total number of samples (optional)
     def __len__(self):
         return len(self.filenames)
-
-# location of the image dictionary
-root = '/Users/hokwanchu/Documents/HKU/Study/BENG_CS/COMP4801/Preprocessing/dataset/train/train2017'
-
-# list of names of images
-filenames = []
-
-# list of category ids
-labels = []
-
-# retrieve information from json
-f = open('/Users/hokwanchu/Documents/HKU/Study/BENG_CS/COMP4801/Preprocessing/dataset/train/lvis_v1_train.json')
-data = json.load(f)
-for i in data['annotations']:
-    fname = str(i['id']).zfill(12) + '.jpg'
-    filenames.append(fname)
-    labels.append(i['category_id'])
-f.close()
-
-
