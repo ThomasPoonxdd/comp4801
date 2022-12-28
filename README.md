@@ -5,4 +5,5 @@ To Be Completed (28/12):
 2. Video Framework
 3. Matplotlib
 4. ViLD Inference Stage
+--vild head, vild model
 5. Logging
