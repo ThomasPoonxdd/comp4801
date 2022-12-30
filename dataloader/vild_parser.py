@@ -187,6 +187,7 @@ class Parser(object):
         # Skips annotations with `is_crowd` = True.
         if self._skip_crowd_during_training and self._is_training:
             num_groundtrtuhs = classes.size()[0] # num_groundtrtuhs = tf.shape(classes)[0]
+            
             # indices = tf.cond(
             #     tf.greater(tf.size(is_crowds), 0),
             #     lambda: tf.where(tf.logical_not(is_crowds))[:, 0],
@@ -196,7 +197,8 @@ class Parser(object):
             else:
                 indices = torch.arange(0, num_groundtrtuhs).to(dtype=torch.int64)
 
-            # classes = tf.gather(classes, indices)
-            # boxes = tf.gather(boxes, indices)
-            # if self._include_mask:
-            #     masks = tf.gather(masks, indices)
+            classes = torch.gather(classes, 1, indices) # classes = tf.gather(classes, indices)
+            boxes = torch.gather(boxes, 1, indices) # boxes = tf.gather(boxes, indices)
+            if self._include_mask:
+                masks = torch.gather(masks, 1, indices) # masks = tf.gather(masks, indices)
+
