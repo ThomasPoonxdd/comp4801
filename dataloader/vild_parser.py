@@ -3,6 +3,7 @@ import torch
 import tf_example_decoder
 
 from utils import input_utils
+from utils import box_utils
 
 class Parser(object):
     def __init__(self,
@@ -223,3 +224,27 @@ class Parser(object):
             else:
                 image, boxes = input_utils.random_horizontal_flip(
                     image, boxes)
+        
+        # Converts boxes from normalized coordinates to pixel coordinates.
+        # Now the coordinates of boxes are w.r.t. the original image.
+        boxes = box_utils.denormalize_boxes(boxes, image_shape)
+        if self._visual_feature_distill:
+            roi_boxes = box_utils.denormalize_boxes(roi_boxes, image_shape)
+
+        # filter out roi boxes smaller than given size
+        if self._filter_distill_boxes_size > 0:
+            roi_indices = box_utils.get_non_empty_box_indices(
+                roi_boxes,
+                self._filter_distill_boxes_size)
+            roi_boxes = torch.gather(roi_boxes, 1, roi_indices) # roi_boxes = tf.gather(roi_boxes, roi_indices)
+            distill_features = torch.gather(distill_features, 1, roi_indices) # distill_features = tf.gather(distill_features, roi_indices)
+
+        # Resizes and crops image.
+        image, image_info = input_utils.resize_and_crop_image(
+            image,
+            self._output_size,
+            padded_size=input_utils.compute_padded_size(
+                self._output_size, 2 ** self._max_level),
+            aug_scale_min=self._aug_scale_min,
+            aug_scale_max=self._aug_scale_max)
+        image_height, image_width, _ = list(image.size()) # image_height, image_width, _ = image.get_shape().as_list()
