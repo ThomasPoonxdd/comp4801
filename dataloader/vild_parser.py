@@ -5,6 +5,7 @@ import tf_example_decoder
 from dataloader import anchor
 from utils import input_utils
 from utils import box_utils
+from utils import dataloader_utils
 
 # The following imports are used for replacing tf.image.crop_and_resize
 # Installation of the following github is required
@@ -134,8 +135,6 @@ class Parser(object):
         else:
             raise ValueError('mode is not defined.')
 
-    
-
     def __call__(self, value):
         """Parses data to an image and associated training labels.
         Args:
@@ -149,8 +148,6 @@ class Parser(object):
             value,
             visual_feat_dim=self._visual_feature_dim)
         return self._parse_fn(data)
-
-
 
     def _parse_train_data(self, data):
         """Parses data for training.
@@ -213,7 +210,7 @@ class Parser(object):
 
         # Gets original image and its size.
         image = data['image']
-        image_shape = image.size()[0:2]
+        image_shape = image.size()[0:2] # image_shape = tf.shape(image)[0:2]
 
         # Normalizes image with mean and std pixel values.
         image = input_utils.normalize_image(image)
@@ -332,4 +329,96 @@ class Parser(object):
             labels['gt_visual_feat'] = input_utils.clip_or_pad_to_fixed_size(
                 distill_features, self._max_num_rois, -1)
         return image, labels
-            
+    
+    def _parse_eval_data(self, data):
+        """Parses data for evaluation.
+        Args:
+        data: the decoded tensor dictionary from TfExampleDecoder.
+        Returns:
+        image: image tensor that is preproessed to have normalized value and
+            dimension [output_size[0], output_size[1], 3]
+        labels: a dictionary of tensors used for training. The following describes
+            {key: value} pairs in the dictionary.
+            image_info: a 2D `Tensor` that encodes the information of the image and
+            the applied preprocessing. It is in the format of
+            [[original_height, original_width], [scaled_height, scaled_width],
+            anchor_boxes: ordered dictionary with keys
+            [min_level, min_level+1, ..., max_level]. The values are tensor with
+            shape [height_l, width_l, 4] representing anchor boxes at each level.
+            groundtruths:
+            source_id: Groundtruth source id.
+            height: Original image height.
+            width: Original image width.
+            boxes: Groundtruth bounding box annotations. The box is represented
+                in [y1, x1, y2, x2] format. The coordinates are w.r.t the scaled
+                image that is fed to the network. The tennsor is padded with -1 to
+                the fixed dimension [self._max_num_instances, 4].
+            classes: Groundtruth classes annotations. The tennsor is padded
+                with -1 to the fixed dimension [self._max_num_instances].
+            areas: Box area or mask area depend on whether mask is present.
+            is_crowds: Whether the ground truth label is a crowd label.
+            num_groundtruths: Number of ground truths in the image.
+        """
+        # Gets original image and its size.
+        image = data['image']
+        image_shape = image.size()[0:2] # image_shape = tf.shape(image)[0:2]
+
+        # Normalizes image with mean and std pixel values.
+        image = input_utils.normalize_image(image)
+
+        # Resizes and crops image.
+        image, image_info = input_utils.resize_and_crop_image(
+            image,
+            self._output_size,
+            padded_size=input_utils.compute_padded_size(
+                self._output_size, 2 ** self._max_level),
+            aug_scale_min=1.0,
+            aug_scale_max=1.0)
+        image_height, image_width, _ = image.get_shape().as_list()
+
+        # Assigns anchor targets.
+        input_anchor = anchor.Anchor(
+            self._min_level,
+            self._max_level,
+            self._num_scales,
+            self._aspect_ratios,
+            self._anchor_size,
+            (image_height, image_width))
+
+        # If bfloat16 is used, casts input image to tf.bfloat16.
+        if self._use_bfloat16:
+            image = image.to(dtype=torch.bfloat16) # image = tf.cast(image, dtype=tf.bfloat16)
+
+        # Sets up groundtruth data for evaluation.
+        groundtruths = {
+            'source_id':
+                data['source_id'],
+            'height':
+                data['height'],
+            'width':
+                data['width'],
+            'num_groundtruths':
+                data['groundtruth_classes'].size(), # tf.shape(data['groundtruth_classes']),
+            'boxes':
+                box_utils.denormalize_boxes(data['groundtruth_boxes'], image_shape),
+            'classes':
+                data['groundtruth_classes'],
+            'areas':
+                data['groundtruth_area'],
+            'is_crowds':
+                data['groundtruth_is_crowd'].to(dtype=torch.int32), # tf.cast(data['groundtruth_is_crowd'], tf.int32),
+        }
+        # TODO(b/143766089): Add ground truth masks for segmentation metrics.
+        groundtruths['source_id'] = dataloader_utils.process_source_id(
+            groundtruths['source_id'])
+        groundtruths = dataloader_utils.pad_groundtruths_to_fixed_size(
+            groundtruths, self._max_num_instances)
+
+        # Packs labels for model_fn outputs.
+        labels = {
+            'anchor_boxes': input_anchor.multilevel_boxes,
+            'image_info': image_info,
+            'groundtruths': groundtruths,
+        }
+
+        return image, labels
