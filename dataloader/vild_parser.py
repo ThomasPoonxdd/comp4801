@@ -248,3 +248,32 @@ class Parser(object):
             aug_scale_min=self._aug_scale_min,
             aug_scale_max=self._aug_scale_max)
         image_height, image_width, _ = list(image.size()) # image_height, image_width, _ = image.get_shape().as_list()
+
+        # Resizes and crops boxes.
+        # Now the coordinates of boxes are w.r.t the scaled image.
+        image_scale = image_info[2, :]
+        offset = image_info[3, :]
+        boxes = input_utils.resize_and_crop_boxes(
+            boxes, image_scale, image_info[1, :], offset)
+        if self._visual_feature_distill:
+            roi_boxes = input_utils.resize_and_crop_boxes(
+                roi_boxes, image_scale, image_info[1, :], offset)
+
+        # Filters out ground truth boxes that are all zeros.
+        indices = box_utils.get_non_empty_box_indices(boxes)
+        boxes = torch.gather(boxes, 1, indices) # boxes = tf.gather(boxes, indices)
+        classes = torch.gather(classes, 1, indices) # classes = tf.gather(classes, indices)
+        if self._include_mask:
+            masks = torch.gather(masks, 1, indices) # masks = tf.gather(masks, indices)
+            # Transfer boxes to the original image space and do normalization.
+            cropped_boxes = boxes + torch.tile(torch.unsqueeze(offset, 0), (1,2)) # cropped_boxes = boxes + tf.tile(tf.expand_dims(offset, axis=0), [1, 2])
+            cropped_boxes /= torch.tile(torch.unsqueeze(image_scale, 0), (1,2)) # cropped_boxes /= tf.tile(tf.expand_dims(image_scale, axis=0), [1, 2])
+            cropped_boxes = box_utils.normalize_boxes(cropped_boxes, image_shape)
+            num_masks = masks.size()[0] # num_masks = tf.shape(masks)[0]
+            # masks = tf.image.crop_and_resize(
+            #     tf.expand_dims(masks, axis=-1),
+            #     cropped_boxes,
+            #     box_indices=tf.range(num_masks, dtype=tf.int32),
+            #     crop_size=[self._mask_crop_size, self._mask_crop_size],
+            #     method='bilinear')
+            # masks = tf.squeeze(masks, axis=-1)
