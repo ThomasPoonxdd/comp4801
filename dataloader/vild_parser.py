@@ -5,6 +5,12 @@ import tf_example_decoder
 from utils import input_utils
 from utils import box_utils
 
+# The following imports are used for replacing tf.image.crop_and_resize
+# Installation of the following github is required
+# https://github.com/longcw/RoIAlign.pytorch
+from roi_align import RoIAlign
+from roi_align import CropAndResize
+
 class Parser(object):
     def __init__(self,
                output_size,
@@ -190,7 +196,6 @@ class Parser(object):
         # Skips annotations with `is_crowd` = True.
         if self._skip_crowd_during_training and self._is_training:
             num_groundtrtuhs = classes.size()[0] # num_groundtrtuhs = tf.shape(classes)[0]
-            
             # indices = tf.cond(
             #     tf.greater(tf.size(is_crowds), 0),
             #     lambda: tf.where(tf.logical_not(is_crowds))[:, 0],
@@ -277,3 +282,6 @@ class Parser(object):
             #     crop_size=[self._mask_crop_size, self._mask_crop_size],
             #     method='bilinear')
             # masks = tf.squeeze(masks, axis=-1)
+            roi_align  = RoIAlign(self._mask_crop_size, self._mask_crop_size)
+            masks = roi_align(torch.unsqueeze(masks, 1), cropped_boxes, torch.arange(0, num_masks).to(dtype=torch.int32))
+            masks = torch.squeeze(masks, 1)
