@@ -2,6 +2,7 @@ import torch
 
 import tf_example_decoder
 
+from dataloader import anchor
 from utils import input_utils
 from utils import box_utils
 
@@ -286,3 +287,49 @@ class Parser(object):
             roi_align  = RoIAlign(self._mask_crop_size, self._mask_crop_size)
             masks = roi_align(masks, cropped_boxes, torch.arange(0, num_masks).to(dtype=torch.int32))
             masks = torch.squeeze(masks, 1)
+        
+        # Assigns anchor targets.
+        # Note that after the target assignment, box targets are absolute pixel
+        # offsets w.r.t. the scaled image.
+        input_anchor = anchor.Anchor(
+            self._min_level,
+            self._max_level,
+            self._num_scales,
+            self._aspect_ratios,
+            self._anchor_size,
+            (image_height, image_width))
+        anchor_labeler = anchor.RpnAnchorLabeler(
+            input_anchor,
+            self._rpn_match_threshold,
+            self._rpn_unmatched_threshold,
+            self._rpn_batch_size_per_im,
+            self._rpn_fg_fraction)
+        rpn_score_targets, rpn_box_targets = anchor_labeler.label_anchors(
+            torch.unsqueeze(classes, 1).to(dtype=torch.float32)) # boxes, tf.cast(tf.expand_dims(classes, axis=-1), dtype=tf.float32))
+
+        # If bfloat16 is used, casts input image to tf.bfloat16.
+        if self._use_bfloat16:
+            image = image.to(dtpye=torch.bfloat16) # image = tf.cast(image, dtype=tf.bfloat16)
+
+        # Packs labels for model_fn outputs.
+        labels = {
+            'anchor_boxes': input_anchor.multilevel_boxes,
+            'image_info': image_info,
+            'rpn_score_targets': rpn_score_targets,
+            'rpn_box_targets': rpn_box_targets,
+        }
+        labels['gt_boxes'] = input_utils.clip_or_pad_to_fixed_size(
+            boxes, self._max_num_instances, -1)
+        labels['gt_classes'] = input_utils.clip_or_pad_to_fixed_size(
+            classes, self._max_num_instances, -1)
+        if self._include_mask:
+            labels['gt_masks'] = input_utils.clip_or_pad_to_fixed_size(
+                masks, self._max_num_instances, -1)
+
+        if self._visual_feature_distill:
+            labels['roi_boxes'] = input_utils.clip_or_pad_to_fixed_size(
+                roi_boxes, self._max_num_rois, -1)
+            labels['gt_visual_feat'] = input_utils.clip_or_pad_to_fixed_size(
+                distill_features, self._max_num_rois, -1)
+        return image, labels
+            
