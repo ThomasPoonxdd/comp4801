@@ -1,11 +1,11 @@
 import torch
 
-import tf_example_decoder
-
 from dataloader import anchor
-from utils import input_utils
+from dataloader import mode_keys as ModeKeys
+import tf_example_decoder
 from utils import box_utils
 from utils import dataloader_utils
+from utils import input_utils
 
 # The following imports are used for replacing tf.image.crop_and_resize
 # Installation of the following github is required
@@ -13,7 +13,10 @@ from utils import dataloader_utils
 from roi_align import RoIAlign
 from roi_align import CropAndResize
 
+
 class Parser(object):
+    """Parser to parse an image and its annotations into a dictionary of tensors."""
+
     def __init__(self,
                output_size,
                min_level,
@@ -39,8 +42,8 @@ class Parser(object):
                visual_feature_dim=512,
                max_num_rois=300,
                filter_distill_boxes_size=0):
-
         """Initializes parameters for parsing annotations in the dataset.
+
         Args:
         output_size: `Tensor` or `list` for [height, width] of output image. The
             output_size should be divided by the largest feature stride 2^max_level.
@@ -81,7 +84,6 @@ class Parser(object):
         boxes such that the precomputed rois smaller than this size will be
             filtered out.
         """
-
         self._mode = mode
         self._max_num_instances = max_num_instances
         self._skip_crowd_during_training = skip_crowd_during_training
@@ -126,19 +128,21 @@ class Parser(object):
             self._filter_distill_boxes_size = filter_distill_boxes_size
 
         # Data is parsed depending on the model Modekey.
-        if self.training == True: # if mode == ModeKeys.TRAIN:
+        if mode == ModeKeys.TRAIN:
             self._parse_fn = self._parse_train_data
-        elif self.training == False: # elif mode == ModeKeys.EVAL:
+        elif mode == ModeKeys.EVAL:
             self._parse_fn = self._parse_eval_data
-        # elif mode == ModeKeys.PREDICT or mode == ModeKeys.PREDICT_WITH_GT:
-        #     self._parse_fn = self._parse_predict_data
+        elif mode == ModeKeys.PREDICT or mode == ModeKeys.PREDICT_WITH_GT:
+            self._parse_fn = self._parse_predict_data
         else:
             raise ValueError('mode is not defined.')
 
     def __call__(self, value):
         """Parses data to an image and associated training labels.
+
         Args:
         value: a string tensor holding a serialized tf.Example proto.
+
         Returns:
         image, labels: if mode == ModeKeys.TRAIN. see _parse_train_data.
         {'images': image, 'labels': labels}: if mode == ModeKeys.PREDICT
@@ -151,8 +155,10 @@ class Parser(object):
 
     def _parse_train_data(self, data):
         """Parses data for training.
+
         Args:
         data: the decoded tensor dictionary from TfExampleDecoder.
+
         Returns:
         image: image tensor that is preproessed to have normalized value and
             dimension [output_size[0], output_size[1], 3]
@@ -202,7 +208,6 @@ class Parser(object):
                 indices = torch.where(torch.logical_not(is_crowds))[0]
             else:
                 indices = torch.arange(0, num_groundtrtuhs).to(dtype=torch.int64)
-
             classes = torch.gather(classes, 1, indices) # classes = tf.gather(classes, indices)
             boxes = torch.gather(boxes, 1, indices) # boxes = tf.gather(boxes, indices)
             if self._include_mask:
@@ -332,8 +337,10 @@ class Parser(object):
     
     def _parse_eval_data(self, data):
         """Parses data for evaluation.
+
         Args:
         data: the decoded tensor dictionary from TfExampleDecoder.
+
         Returns:
         image: image tensor that is preproessed to have normalized value and
             dimension [output_size[0], output_size[1], 3]
@@ -422,3 +429,86 @@ class Parser(object):
         }
 
         return image, labels
+
+    def _parse_predict_data(self, data):
+        """Parses data for prediction.
+
+        Args:
+        data: the decoded tensor dictionary from TfExampleDecoder.
+        
+        Returns:
+        A dictionary of {'images': image, 'labels': labels} where
+            images: image tensor that is preproessed to have normalized value and
+            dimension [output_size[0], output_size[1], 3]
+            labels: a dictionary of tensors used for training. The following
+            describes {key: value} pairs in the dictionary.
+            source_ids: Source image id. Default value -1 if the source id is
+                empty in the groundtruth annotation.
+            image_info: a 2D `Tensor` that encodes the information of the image
+                and the applied preprocessing. It is in the format of
+                [[original_height, original_width], [scaled_height, scaled_width],
+            anchor_boxes: ordered dictionary with keys
+                [min_level, min_level+1, ..., max_level]. The values are tensor with
+                shape [height_l, width_l, 4] representing anchor boxes at each
+                level.
+        """
+        # Gets original image and its size.
+        image = data['image']
+        image_shape = image.size()[0:2] # image_shape = tf.shape(image)[0:2]
+
+        # Normalizes image with mean and std pixel values.
+        image = input_utils.normalize_image(image)
+
+        # Resizes and crops image.
+        image, image_info = input_utils.resize_and_crop_image(
+            image,
+            self._output_size,
+            padded_size=input_utils.compute_padded_size(
+                self._output_size, 2 ** self._max_level),
+            aug_scale_min=1.0,
+            aug_scale_max=1.0)
+        image_height, image_width, _ = image.get_shape().as_list()
+
+        # If bfloat16 is used, casts input image to tf.bfloat16.
+        if self._use_bfloat16:
+            image = image.to(dtype=torch.bfloat16) # image = tf.cast(image, dtype=tf.bfloat16)
+
+        # Compute Anchor boxes.
+        input_anchor = anchor.Anchor(
+            self._min_level,
+            self._max_level,
+            self._num_scales,
+            self._aspect_ratios,
+            self._anchor_size,
+            (image_height, image_width))
+
+        labels = {
+            'source_id': dataloader_utils.process_source_id(data['source_id']),
+            'anchor_boxes': input_anchor.multilevel_boxes,
+            'image_info': image_info,
+        }
+
+        if self._mode == ModeKeys.PREDICT_WITH_GT: # if self._mode == ModeKeys.PREDICT_WITH_GT:
+            # Converts boxes from normalized coordinates to pixel coordinates.
+            boxes = box_utils.denormalize_boxes(
+                data['groundtruth_boxes'], image_shape)
+            groundtruths = {
+                'source_id': data['source_id'],
+                'height': data['height'],
+                'width': data['width'],
+                'num_detections': data['groundtruth_classes'].size(), # 'num_detections': tf.shape(data['groundtruth_classes']),
+                'boxes': boxes,
+                'classes': data['groundtruth_classes'],
+                'areas': data['groundtruth_area'],
+                'is_crowds': data['groundtruth_is_crowd'].to(dtype=torch.int32) # 'is_crowds': tf.cast(data['groundtruth_is_crowd'], tf.int32),
+            }
+            groundtruths['source_id'] = dataloader_utils.process_source_id(
+                groundtruths['source_id'])
+            groundtruths = dataloader_utils.pad_groundtruths_to_fixed_size(
+                groundtruths, self._max_num_instances)
+            labels['groundtruths'] = groundtruths
+
+            return {
+                'images': image,
+                'labels': labels,
+            }
