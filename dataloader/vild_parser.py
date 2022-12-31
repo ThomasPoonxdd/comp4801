@@ -282,6 +282,7 @@ class Parser(object):
             #     crop_size=[self._mask_crop_size, self._mask_crop_size],
             #     method='bilinear')
             # masks = tf.squeeze(masks, axis=-1)
+            masks = torch.unsqueeze(masks, 1).permute(0,3,2,1)
             roi_align  = RoIAlign(self._mask_crop_size, self._mask_crop_size)
-            masks = roi_align(torch.unsqueeze(masks, 1), cropped_boxes, torch.arange(0, num_masks).to(dtype=torch.int32))
+            masks = roi_align(masks, cropped_boxes, torch.arange(0, num_masks).to(dtype=torch.int32))
             masks = torch.squeeze(masks, 1)
