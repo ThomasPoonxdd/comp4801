@@ -20,7 +20,7 @@ from __future__ import print_function
 
 import numpy as np
 import torch
-import tensorflow.compat.v1 as tf
+# import tensorflow.compat.v1 as tf
 
 
 EPSILON = 1e-8
