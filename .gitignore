@@ -16,7 +16,6 @@ projects/
 resnet50_vild/
 utils/
 *.tar.gz
-playgroud.ipynb
 frcnn.txt
-
+lvis_v1_train.json
 
