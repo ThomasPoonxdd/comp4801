@@ -19,3 +19,4 @@ utils/
 frcnn.txt
 lvis_v1_train.json
 tensorflow/
+train/
