@@ -8,10 +8,13 @@ from torchvision.models.detection import fasterrcnn_resnet50_fpn_v2
 from text_embedding import CLIP
 # params = JSON
 class ViLDModel(torch.Module):
+    # initialization
     def __init__(self, params_path, training = True):
+        # receive params from specified file
         with open(params_path, "r") as f:
             params =json.load(f)
         self.params = params
+        # fasterrcnn setting
         self.model = fasterrcnn_resnet50_fpn_v2(
             # min_size, max_size
             num_classes = params["architecture"]["num_classes"],
@@ -68,9 +71,11 @@ class ViLDModel(torch.Module):
         #     rpn_nms_thresh,
         #     score_thresh=0.0
         # )
-    
+        
+        # set training mode
         self.training= training
-
+        
+        # for learning visual concepts from natural language supervision
         self.clip = CLIP()
 
         frcnn_params = params["fcrnn_head"]
