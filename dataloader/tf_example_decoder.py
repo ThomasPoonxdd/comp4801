@@ -1,11 +1,11 @@
 # Copyright 2019 The TensorFlow Authors. All Rights Reserved.
-#
+
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-#
+
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
+
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,11 +21,10 @@ protos for object detection.
 import torch
 import torchvision
 
-
-def _get_source_id_from_encoded_image(parsed_tensors):
-  return tf.strings.as_string(
-      tf.strings.to_hash_bucket_fast(parsed_tensors['image/encoded'],
-                                     2**63 - 1))
+# def _get_source_id_from_encoded_image(parsed_tensors):
+#   return tf.strings.as_string(
+#       tf.strings.to_hash_bucket_fast(parsed_tensors['image/encoded'],
+#                                      2**63 - 1))
 
 
 class TfExampleDecoder(object):
@@ -71,12 +70,11 @@ class TfExampleDecoder(object):
 
   def _decode_image(self, parsed_tensors):
     """Decodes the image and set its static shape."""
-    # image = tf.io.decode_image(parsed_tensors['image/encoded'], channels=3)
     image = torchvision.io.decode_image(parsed_tensors['image/encoded'], torchvision.io.ImageReadMode.RGB_ALPHA)
 
-    ### Need to be modified
+    ### Need translation
+    ### pytorch set_shape works differently
     image.set_shape([None, None, 3])
-    ###
     return image
 
   def _decode_boxes(self, parsed_tensors, box_key_prefix='image/object/bbox'):
@@ -94,9 +92,9 @@ class TfExampleDecoder(object):
           torchvision.io.decode_png(png_bytes, torchvision.io.ImageReadMode.GRAY).to(dtpye=torch.unit8), -1)
       mask = mask.to(dtype=torch.float32)
 
-      ### Need to be modified
+      ### Need translation
+      ### pytorch set_shape works differently
       mask.set_shape([None, None])
-      ###
       return mask
 
     height = parsed_tensors['image/height']
@@ -104,16 +102,10 @@ class TfExampleDecoder(object):
     masks = parsed_tensors['image/object/mask']
 
     if torch.size(masks) > 0:
-      ### Need to be modified
       return tf.map_fn(_decode_png_mask, masks, dtype=tf.float32)
-      ###
     else:
       return torch.zeros(0, height, width).to(dtype=torch.float32)
 
-    # return tf.cond(
-    #     tf.greater(tf.size(masks), 0),
-    #     lambda: tf.map_fn(_decode_png_mask, masks, dtype=tf.float32),
-    #     lambda: tf.zeros([0, height, width], dtype=tf.float32))
 
   def _decode_areas(self, parsed_tensors):
     xmin = torch.maximum(parsed_tensors['image/object/bbox/xmin'], 0)
@@ -128,10 +120,6 @@ class TfExampleDecoder(object):
     else:
       return (xmax - xmin) * (ymax - ymin) * height * width
 
-    # return tf.cond(
-    #     tf.greater(tf.shape(parsed_tensors['image/object/area'])[0], 0),
-    #     lambda: parsed_tensors['image/object/area'],
-    #     lambda: (xmax - xmin) * (ymax - ymin) * height * width)
 
   def decode(self, serialized_example, visual_feat_dim=512):
     """Decode the serialized example.
@@ -154,7 +142,6 @@ class TfExampleDecoder(object):
             [None, None, None].
         - groundtruth_instance_masks_png: a string tensor of shape [None].
     """
-    ### Need to be modified
     parsed_tensors = tf.io.parse_single_example(
         serialized_example, self._keys_to_features)
     for k in parsed_tensors:
@@ -165,7 +152,6 @@ class TfExampleDecoder(object):
         else:
           parsed_tensors[k] = tf.sparse_tensor_to_dense(
               parsed_tensors[k], default_value=0)
-      ###
 
     image = self._decode_image(parsed_tensors)
     boxes = self._decode_boxes(parsed_tensors)
@@ -178,7 +164,6 @@ class TfExampleDecoder(object):
     decode_image_shape = torch.logical_or(
         torch.equal(parsed_tensors['image/height'], -1),
         torch.equal(parsed_tensors['image/width'], -1))
-    # image_shape = tf.cast(tf.shape(image), dtype=tf.int64)
     image_shape = image.size().to(dtpye=torch.int64)
 
     parsed_tensors['image/height'] = torch.where(decode_image_shape,
@@ -187,10 +172,6 @@ class TfExampleDecoder(object):
     parsed_tensors['image/width'] = torch.where(decode_image_shape, image_shape[1],
                                              parsed_tensors['image/width'])
 
-    # is_crowds = tf.cond(
-    #     tf.greater(tf.shape(parsed_tensors['image/object/is_crowd'])[0], 0),
-    #     lambda: tf.cast(parsed_tensors['image/object/is_crowd'], dtype=tf.bool),
-    #     lambda: tf.zeros_like(parsed_tensors['image/object/class/label'], dtype=tf.bool))  # pylint: disable=line-too-long
     if parsed_tensors['image/object/is_crowd'].size()[0] > 0:
       is_crowds = parsed_tensors['image/object/is_crowd'].to(dtype=torch.bool)
     else:
@@ -236,3 +217,123 @@ class TfExampleDecoder(object):
             'roi_scores': roi_scores,
         })
     return decoded_tensors
+
+""" For testing the decoder"""
+import json
+import os
+import os.path as osp
+import hashlib
+
+# Translated from tpu-master/models/official/detection/projects/vild/preprocessing/create_lvis_tf_record.py
+# To test how to pass image info from json to decoder
+def testing():
+    json_path = '/Users/hokwanchu/Downloads/4801/sorted.json'
+    with open(json_path) as json_file:
+        data = json.load(json_file)
+        for i in data['images']:
+            image = i
+            id = image['id']
+            image_dir = '/Users/hokwanchu/Documents/HKU/Study/BENG_CS/COMP4801/Preprocessing/dataset/train'
+            annotations = []
+            for anno in data['annotations']:
+                if anno['image_id'] == id:
+                    annotations.append(anno)
+            category_index = data['categories']
+
+            image_height = image['height']
+            image_width = image['width']
+            filename = image['coco_url']
+            filename = osp.join(*filename.split('/')[-2:])
+
+            image_id = image['id']
+            image_not_exhaustive_category_ids = image['not_exhaustive_category_ids']
+            image_neg_category_ids = image['neg_category_ids']
+
+            full_path = os.path.join(image_dir, filename)
+
+            if not osp.exists(full_path):
+                # return False, None, None
+                pass
+
+            with open(full_path, 'rb') as fid:
+                encoded_jpg = fid.read()
+
+            key = hashlib.sha256(encoded_jpg).hexdigest()
+            feature_dict = {
+                'image/height':
+                    image_height,
+                'image/width':
+                    image_width,
+                'image/filename':
+                    filename.encode('utf8'),
+                'image/source_id':
+                    str(image_id).encode('utf8'),
+                'image/key/sha256':
+                    key.encode('utf8'),
+                'image/encoded':
+                    encoded_jpg,
+                'image/format':
+                    'jpeg'.encode('utf8'),
+                'image/not_exhaustive_category_ids':
+                    image_not_exhaustive_category_ids,
+                'image/image_neg_category_ids':
+                    image_neg_category_ids,
+            }
+
+            if len(annotations) > 0:
+                xmin = []
+                xmax = []
+                ymin = []
+                ymax = []
+                is_crowd = []
+                category_names = []
+                category_ids = []
+                area = []
+                encoded_mask_png = []
+                for object_annotations in annotations:
+                    (x, y, width, height) = tuple(object_annotations['bbox'])
+
+                    xmin_single = max(float(x) / image_width, 0.0)
+                    xmax_single = min(float(x + width) / image_width, 1.0)
+                    ymin_single = max(float(y) / image_height, 0.0)
+                    ymax_single = min(float(y + height) / image_height, 1.0)
+                    if xmax_single <= xmin_single or ymax_single <= ymin_single:
+                        continue
+                    xmin.append(xmin_single)
+                    xmax.append(xmax_single)
+                    ymin.append(ymin_single)
+                    ymax.append(ymax_single)
+
+                    is_crowd.append(0)
+                    category_id = int(object_annotations['category_id'])
+                    category_ids.append(category_id)
+                    category_names.append(category_index[category_id]['name'].encode('utf8'))
+                    area.append(object_annotations['area'])
+
+                feature_dict.update({
+                    'image/object/bbox/xmin':
+                        xmin,
+                    'image/object/bbox/xmax':
+                        xmax,
+                    'image/object/bbox/ymin':
+                        ymin,
+                    'image/object/bbox/ymax':
+                        ymax,
+                    'image/object/class/text':
+                        category_names,
+                    'image/object/class/label':
+                        category_ids,
+                    'image/object/is_crowd':
+                        is_crowd,
+                    'image/object/area':
+                        area,
+                    })
+
+            example = feature_dict
+
+            
+
+            # return True, filename, example
+        json_file.close()
+
+testing()
