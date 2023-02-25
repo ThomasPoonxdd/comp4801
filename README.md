@@ -1,16 +1,15 @@
 Comp4801
 
 1. Dataset (Thomas)
-  1.1. LVIS augementation
-  1.2. LVIS data format key,value pair documentation
+    - LVIS augementation
+    - LVIS data format key,value pair documentation
 2. Trainer 
-  2.1. DefaultTrainer
+    - DefaultTrainer
 3. Predictor
-  3.3. DefaultPredictor
+    - DefaultPredictor
 4. Visualization ? (Piggy)
-  4.1. Tensorboard
-  4.2. Demo
+    - Tensorboard
+    - Demo
 5. Video analysis (Piggy)
-
 6. Module Configuration
 7. Model modules
