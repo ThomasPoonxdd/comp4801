@@ -12,4 +12,7 @@ Comp4801
     - Demo
 5. Video analysis (Piggy)
 6. Module Configuration
+    - config folder 
+        - Base_VILD_RCNN_FPN.yaml
 7. Model modules
+    - modeling folder
