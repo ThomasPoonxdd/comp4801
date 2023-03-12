@@ -7,3 +7,4 @@
 .vscode/
 detectron2/
 playground.ipynb
+log/
