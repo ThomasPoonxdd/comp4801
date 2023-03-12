@@ -20,3 +20,5 @@ frcnn.txt
 lvis_v1_train.json
 tensorflow/
 train/
+detectron2/
+playground.ipynb
