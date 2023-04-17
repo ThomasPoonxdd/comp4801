@@ -120,7 +120,8 @@ class GetObjectLocationFromCamera_Class():
         
 
     def Calculate_3Dpts_2ImageFromSingleCamera_with_SpeedOfRobot(self, x1, x2, cameraMat, forward_speed, deltaT, 
-                                                                 angular_speed = None, trans_cor = 2, left_right_cor = None, left_sign = None, rMat=None, tVec=None):
+                                                                 angular_speed = None, forward_cor = 2, left_right_cor = None,
+                                                                 left_sign = None, rMat=None, tVec=None, disto = None):
         """_summary_
 
         Args:
@@ -129,40 +130,64 @@ class GetObjectLocationFromCamera_Class():
             cameraMat ( np.array[3,3] ): matrix related to intrinsic parameters of the camera
             speed ( float ): forword spped of the robot
             deltaT ( float ): time difference between 2 images
-            trans_cor ( int , optional): Translation coordinate, 0 to x, 1 to y, 2 to z. Defaults to 2.
+            angular_speed ( float , optional ) : angular speed of the robot counterclockwisely. Defaults to None.
+            forward_cor ( int , optional): forward coordinate, 0 to x, 1 to y, 2 to z. Defaults to 2.
+            left_right_cor (int , optional) : left and right coordinate, 0 to x, 1 to y, 2 to z. Defaults to None.
+            left_sign (int , optional) : determine whether the left is +ive or -ive of left and right coordinate. Defaults to None.
             rMat ( np.array[3,3] , optional): Rotational matrix from world coordinates to camera coordinates. Defaults to None.
             tVec ( np.array[3,] , optional): Translation vector from  world coordinates to camera coordinates. Defaults to None.
+            disto ( np.array[ 4/5/8/12/14 , optional ]) : distortion coefficients of the camera. Defaults to None.
 
         Returns:
             np.array[4,]: homogeneous 3d coordinates
         """
-        if angular_speed != None or left_right_cor != None:
-            assert angular_speed != None and left_right_cor != None ,"angular_speed and left_righ_cor must be specified at the same time"
+        if angular_speed != None or left_right_cor != None or left_sign != None:
+            assert angular_speed != None and left_right_cor != None and left_sign != None,\
+                "angular_speed, left_righ_cor and left_sign must be specified at the same time"
         
             
         if rMat == None:
             rMat = np.identity(3, dtype="float32")
         if tVec == None:
             tVec = np.zeros((3,), dtype="float32")
-        proj_mat1 = self.Calculate_Projective_Matrix(cameraMat,rMat,tVec)
+        
         
         rMat2 = np.deepcopy(rMat)
         tVec2 = np.deepcopy(tVec)
         
         if angular_speed == None:
             # translational motion 
-            tVec2[trans_cor] = forward_speed*deltaT
+            tVec2[forward_cor] = forward_speed*deltaT
         else:
-            tVec2[trans_cor] = forward_speed*deltaT*np.cos(deltaT*angular_speed)
+            tVec2[forward_cor] = forward_speed*deltaT*np.cos(deltaT*angular_speed)
             tVec2[left_right_cor] = left_sign * forward_speed*deltaT*np.sin(deltaT*angular_speed)
             rMat2 = np.matmul(rMat2, self.Rotate_Via_z_Axis_RightHand(deltaT*angular_speed))
         
-        proj_mat2 = self.Calculate_Projective_Matrix(cameraMat,rMat2,tVec2)
         
-        # solve the linear equations with Direct linear transformation (DLT)
-        p = cv2.triangulatePoints(proj_mat1, proj_mat2, x1.T, x2.T)
-        p /= p[3]
-        return p.T
+        if disto == None:
+            proj_mat1 = self.Calculate_Projective_Matrix(cameraMat,rMat,tVec)
+            proj_mat2 = self.Calculate_Projective_Matrix(cameraMat,rMat2,tVec2)
+            
+            # solve the linear equations with Direct linear transformation (DLT)
+            p_4d = cv2.triangulatePoints(proj_mat1, proj_mat2, x1.T, x2.T)
+            p_4d /= p_4d[3]
+        else:
+            x1_undistorted = cv2.undistortedPoints(x1, cameraMatrix = cameraMat, distCoeffs = disto)
+            x2_undistorted = cv2.undistortedPoints(x2, cameraMatrix = cameraMat, distCoeffs = disto)
+            proj_mat1 = self.Calculate_Projective_Matrix(np.identity(3, dtype="float32"),rMat,tVec)
+            proj_mat2 = self.Calculate_Projective_Matrix(np.identity(3, dtype="float32"),rMat2,tVec2)
+            p_4d = cv2.triangulatePoints(proj_mat1, proj_mat2, x1_undistorted, x2_undistorted)
+            p_4d /= p_4d[3]
+            
+        return p_4d.T
 
 if __name__ == "__main__":
     a = GetObjectLocationFromCamera_Class()
+    rMat = np.array([[1, 0, 0],
+                    [0, -1, 0],
+                    [0, 0, 1]]) \
+                    @ np.array([[1, 0, 0],
+                                [0, 0, 1],
+                                [0, 1, 0]])
+    tVec =  np.array([0,0,1])
+    
