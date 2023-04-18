@@ -1,3 +1,7 @@
+"""
+credit from https://www.youtube.com/watch?v=_-BTKiamRTg
+"""
+
 import numpy as np
 import cv2 as cv
 import os
@@ -9,7 +13,7 @@ import pickle
 ################ FIND CHESSBOARD CORNERS - OBJECT POINTS AND IMAGE POINTS #############################
 
 chessboardSize = (8,5)
-frameSize = (640,480)
+frameSize = (1920,1080)
 
 
 
@@ -21,7 +25,7 @@ criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 objp = np.zeros((chessboardSize[0] * chessboardSize[1], 3), np.float32)
 objp[:,:2] = np.mgrid[0:chessboardSize[0],0:chessboardSize[1]].T.reshape(-1,2)
 
-size_of_chessboard_squares_mm = 20
+size_of_chessboard_squares_mm = 29
 objp = objp * size_of_chessboard_squares_mm
 
 
@@ -30,10 +34,11 @@ objpoints = [] # 3d point in real world space
 imgpoints = [] # 2d points in image plane.
 
 script_dir = os.path.dirname(__file__)
-images = glob.glob(f'{script_dir}/images/*.png')
+images = glob.glob(f'{script_dir}/images/*.jpg')
+
 
 for image in images:
-
+    # print(image)
     img = cv.imread(image)
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 
@@ -58,52 +63,13 @@ cv.destroyAllWindows()
 
 
 
-############## CALIBRATION #######################################################
+# ############## CALIBRATION #######################################################
 
 ret, cameraMatrix, dist, rvecs, tvecs = cv.calibrateCamera(objpoints, imgpoints, frameSize, None, None)
+
 
 # Save the camera calibration result for later use (we won't worry about rvecs / tvecs)
 pickle.dump((cameraMatrix, dist), open( "calibration.pkl", "wb" ))
 pickle.dump(cameraMatrix, open( "cameraMatrix.pkl", "wb" ))
 pickle.dump(dist, open( "dist.pkl", "wb" ))
 
-
-############## UNDISTORTION #####################################################
-
-img = cv.imread('cali5.png')
-h,  w = img.shape[:2]
-newCameraMatrix, roi = cv.getOptimalNewCameraMatrix(cameraMatrix, dist, (w,h), 1, (w,h))
-
-
-
-# Undistort
-dst = cv.undistort(img, cameraMatrix, dist, None, newCameraMatrix)
-
-# crop the image
-x, y, w, h = roi
-dst = dst[y:y+h, x:x+w]
-cv.imwrite('caliResult1.png', dst)
-
-
-
-# Undistort with Remapping
-mapx, mapy = cv.initUndistortRectifyMap(cameraMatrix, dist, None, newCameraMatrix, (w,h), 5)
-dst = cv.remap(img, mapx, mapy, cv.INTER_LINEAR)
-
-# crop the image
-x, y, w, h = roi
-dst = dst[y:y+h, x:x+w]
-cv.imwrite('caliResult2.png', dst)
-
-
-
-
-# Reprojection Error
-mean_error = 0
-
-for i in range(len(objpoints)):
-    imgpoints2, _ = cv.projectPoints(objpoints[i], rvecs[i], tvecs[i], cameraMatrix, dist)
-    error = cv.norm(imgpoints[i], imgpoints2, cv.NORM_L2)/len(imgpoints2)
-    mean_error += error
-
-print( "total error: {}".format(mean_error/len(objpoints)) )
